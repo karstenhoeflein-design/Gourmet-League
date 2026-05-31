@@ -762,7 +762,7 @@ function MyTab({ visits, setVisits, currentUserId }) {
   const [showModal, setShowModal] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const [recommendTarget, setRecommendTarget] = useState(null);
-  const [form, setForm] = useState({ name: "", city: "", street: "", cuisine: "", rating: 0, review: "", photo: null });
+  const [form, setForm] = useState({ name: "", street: "", plz: "", city: "", cuisine: "", rating: 0, review: "", photo: null });
   const [sortBy, setSortBy] = useState("date");
   const [animateNew, setAnimateNew] = useState(null);
   const [showBreakdown, setShowBreakdown] = useState(false);
@@ -778,12 +778,12 @@ function MyTab({ visits, setVisits, currentUserId }) {
     const seen = new Set(visits.map(v => (v.name + "||" + v.city).toLowerCase()));
     let p = seen.has(key) ? 5 : 20; if (form.review) p += 3; if (form.photo) p += 5; return p;
   }
-  function handleSelect(r) { setForm(f => ({ ...f, name: r.name, city: r.city || "", street: r.street || "", cuisine: r.cuisine || "" })); setShowSearch(false); }
+  function handleSelect(r) { setForm(f => ({ ...f, name: r.name, street: r.street || "", plz: r.plz || "", city: r.city || "", cuisine: r.cuisine || "" })); setShowSearch(false); }
   function handleAdd() {
     if (!form.name || !form.city || !form.rating) return;
     const nv = { ...form, id: Date.now(), date: new Date().toISOString().slice(0, 10) };
     setVisits(p => [...p, nv]); setAnimateNew(nv.id); setTimeout(() => setAnimateNew(null), 800);
-    setForm({ name: "", city: "", street: "", cuisine: "", rating: 0, review: "", photo: null }); setShowModal(false);
+    setForm({ name: "", street: "", plz: "", city: "", cuisine: "", rating: 0, review: "", photo: null }); setShowModal(false);
   }
   const pts = previewPts();
 
@@ -917,9 +917,24 @@ function MyTab({ visits, setVisits, currentUserId }) {
               <b style={{ color: T.gold }}>Erstbesuch</b> = 20 Pkt &nbsp;·&nbsp; <b style={{ color: T.gold }}>Wiederholt</b> = 5 Pkt &nbsp;·&nbsp; <span style={{ color: "#7acc60" }}>✍</span> +3 &nbsp;·&nbsp; <span style={{ color: "#6a90c0" }}>📸</span> +5
             </div>
 
-            {[{ k: "name", l: "Restaurant-Name", p: "z.B. Zum Franziskaner" }, { k: "city", l: "Stadt", p: "z.B. Frankfurt" }, { k: "cuisine", l: "Küche (optional)", p: "z.B. Deutsch, Japanisch …" }].map(({ k, l, p }) => (
-              <InputField key={k} label={l} value={form[k]} onChange={e => setForm(f => ({ ...f, [k]: e.target.value }))} placeholder={p} />
-            ))}
+            <InputField label="Restaurantname" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="z.B. Zum Franziskaner" />
+            <InputField label="Straße & Hausnummer" value={form.street} onChange={e => setForm(f => ({ ...f, street: e.target.value }))} placeholder="z.B. Kaiserstraße 14" />
+            <div style={{ display: "flex", gap: 12 }}>
+              <div style={{ width: 110, flexShrink: 0 }}>
+                <InputField label="PLZ" value={form.plz} onChange={e => setForm(f => ({ ...f, plz: e.target.value }))} placeholder="z.B. 60311" />
+              </div>
+              <div style={{ flex: 1 }}>
+                <InputField label="Ort" value={form.city} onChange={e => setForm(f => ({ ...f, city: e.target.value }))} placeholder="z.B. Frankfurt" />
+              </div>
+            </div>
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: "block", fontSize: 10, letterSpacing: 3, color: T.textDim, textTransform: "uppercase", marginBottom: 8, fontFamily: "DM Sans, sans-serif" }}>Küche</label>
+              <select value={form.cuisine} onChange={e => setForm(f => ({ ...f, cuisine: e.target.value }))}
+                style={{ width: "100%", boxSizing: "border-box", background: T.bgRaised, border: "1px solid " + T.border, borderRadius: 10, padding: "13px 16px", color: form.cuisine ? T.text : T.textDim, fontSize: 14, fontFamily: "DM Sans, sans-serif", outline: "none" }}>
+                <option value="">Bitte wählen …</option>
+                {CUISINE_OPTIONS.map(c => <option key={c} value={c} style={{ color: T.text, background: T.bgRaised }}>{c}</option>)}
+              </select>
+            </div>
 
             <div style={{ marginBottom: 18 }}>
               <div style={{ fontSize: 10, letterSpacing: 3, color: T.textDim, textTransform: "uppercase", marginBottom: 10, fontFamily: "DM Sans, sans-serif" }}>Bewertung</div>
