@@ -114,52 +114,64 @@ function normalizeRestaurants(arr) {
     lat: Number(r.lat), lng: Number(r.lng),
   })).filter(r => r.lat && r.lng && !isNaN(r.lat) && !isNaN(r.lng));
 }
-async function searchRestaurantsAI(q) {
-  const qt = q.trim();
-
-  // 1) Name search via Overpass (whole Germany, max 20 hits)
-  const nameQuery = `[out:json][timeout:15];node["amenity"="restaurant"]["name"~"${qt.replace(/"/g, "")}",i](47.3,5.9,55.1,15.1);out tags 20;`;
-  const nameRes = await fetch("https://overpass-api.de/api/interpreter", { method: "POST", body: "data=" + encodeURIComponent(nameQuery) });
-  if (nameRes.ok) {
-    const nameData = await nameRes.json();
-    const byName = (nameData.elements || []).filter(el => el.tags?.name).map(el => ({
-      id: "osm-" + el.id, name: el.tags.name,
-      city: el.tags["addr:city"] || el.tags["addr:suburb"] || "",
-      street: el.tags["addr:street"] ? el.tags["addr:street"] + (el.tags["addr:housenumber"] ? " " + el.tags["addr:housenumber"] : "") : "",
-      cuisine: el.tags.cuisine ? el.tags.cuisine.replace(/_/g, " ") : "",
-      openingHours: el.tags.opening_hours || "", website: el.tags.website || "",
-      lat: el.lat, lng: el.lon,
-      globalAvg: parseFloat((3.5 + Math.random() * 1.4).toFixed(1)),
-      globalCount: Math.floor(50 + Math.random() * 800),
-      priceRange: ["€","€€","€€€"][Math.floor(Math.random() * 3)],
-    }));
-    if (byName.length > 0) return normalizeRestaurants(byName);
-  }
-
-  // 2) Geocode the query (city / cuisine / area) via Nominatim, then search nearby
-  const geoRes = await fetch("https://nominatim.openstreetmap.org/search?q=" + encodeURIComponent(qt + " Deutschland") + "&format=json&limit=1", { headers: { "Accept-Language": "de" } });
-  if (!geoRes.ok) throw new Error("Keine Ergebnisse gefunden");
-  const geoData = await geoRes.json();
-  if (!geoData.length) throw new Error("Ort nicht gefunden. Versuche einen Restaurantnamen oder eine Stadt.");
-  const { lat, lon } = geoData[0];
-
-  const nearQuery = `[out:json][timeout:15];node["amenity"="restaurant"](around:2500,${lat},${lon});out tags 25;`;
-  const nearRes = await fetch("https://overpass-api.de/api/interpreter", { method: "POST", body: "data=" + encodeURIComponent(nearQuery) });
-  if (!nearRes.ok) throw new Error("Keine Restaurants gefunden");
-  const nearData = await nearRes.json();
-  const nearby = (nearData.elements || []).filter(el => el.tags?.name).map(el => ({
-    id: "osm-" + el.id, name: el.tags.name,
-    city: el.tags["addr:city"] || el.tags["addr:suburb"] || "",
-    street: el.tags["addr:street"] ? el.tags["addr:street"] + (el.tags["addr:housenumber"] ? " " + el.tags["addr:housenumber"] : "") : "",
-    cuisine: el.tags.cuisine ? el.tags.cuisine.replace(/_/g, " ") : "",
-    openingHours: el.tags.opening_hours || "", website: el.tags.website || "",
-    lat: el.lat, lng: el.lon,
+function osmElementToRestaurant(el) {
+  const tags = el.tags || {};
+  return {
+    id: "osm-" + el.id,
+    name: tags.name || el.display_name?.split(",")[0] || "Unbekannt",
+    city: tags["addr:city"] || tags["addr:suburb"] || "",
+    street: tags["addr:street"] ? tags["addr:street"] + (tags["addr:housenumber"] ? " " + tags["addr:housenumber"] : "") : "",
+    cuisine: tags.cuisine ? tags.cuisine.replace(/_/g, " ") : "",
+    openingHours: tags.opening_hours || "",
+    website: tags.website || "",
+    lat: el.lat || el.centre?.lat,
+    lng: el.lon || el.centre?.lon,
     globalAvg: parseFloat((3.5 + Math.random() * 1.4).toFixed(1)),
     globalCount: Math.floor(50 + Math.random() * 800),
     priceRange: ["€","€€","€€€"][Math.floor(Math.random() * 3)],
-  }));
-  if (!nearby.length) throw new Error("Keine Restaurants in diesem Bereich gefunden");
-  return normalizeRestaurants(nearby);
+  };
+}
+async function searchRestaurantsAI(q) {
+  const qt = q.trim();
+
+  // Step 1: Nominatim — find restaurants by name OR geocode a city/area
+  const nomUrl = "https://nominatim.openstreetmap.org/search?" + new URLSearchParams({
+    q: qt, format: "json", limit: "20", countrycodes: "de", addressdetails: "1",
+  });
+  const nomRes = await fetch(nomUrl);
+  if (!nomRes.ok) throw new Error("Suche nicht erreichbar (Nominatim " + nomRes.status + ")");
+  const nomData = await nomRes.json();
+
+  // Direct restaurant hits from Nominatim
+  const directHits = nomData.filter(r => r.class === "amenity" && r.type === "restaurant");
+  if (directHits.length > 0) {
+    return normalizeRestaurants(directHits.map(r => ({
+      id: "nom-" + r.place_id,
+      name: r.namedetails?.name || r.display_name.split(",")[0],
+      city: r.address?.city || r.address?.town || r.address?.village || r.address?.suburb || "",
+      street: r.address?.road ? r.address.road + (r.address?.house_number ? " " + r.address.house_number : "") : "",
+      cuisine: "",
+      openingHours: "",
+      website: "",
+      lat: parseFloat(r.lat),
+      lng: parseFloat(r.lon),
+      globalAvg: parseFloat((3.5 + Math.random() * 1.4).toFixed(1)),
+      globalCount: Math.floor(50 + Math.random() * 800),
+      priceRange: "€€",
+    })));
+  }
+
+  // Step 2: Treat query as a location — geocode and find restaurants nearby via Overpass
+  if (!nomData.length) throw new Error("Nichts gefunden. Tipp: Restaurantname oder Stadt eingeben.");
+  const { lat, lon } = nomData[0];
+
+  const overpassQ = "[out:json][timeout:20];node[\"amenity\"=\"restaurant\"](around:3000," + lat + "," + lon + ");out tags 30;";
+  const ovRes = await fetch("https://overpass-api.de/api/interpreter", { method: "POST", body: "data=" + encodeURIComponent(overpassQ) });
+  if (!ovRes.ok) throw new Error("Restaurants konnten nicht geladen werden");
+  const ovData = await ovRes.json();
+  const results = (ovData.elements || []).filter(el => el.tags?.name).map(osmElementToRestaurant);
+  if (!results.length) throw new Error("Keine Restaurants in diesem Bereich gefunden");
+  return normalizeRestaurants(results);
 }
 async function fetchNearbyRestaurants(lat, lng) {
   try {
