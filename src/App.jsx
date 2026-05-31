@@ -134,12 +134,9 @@ function osmElementToRestaurant(el) {
 async function searchRestaurantsAI(q) {
   const qt = q.trim();
 
-  // Step 1: Nominatim — find restaurants by name OR geocode a city/area
-  const nomUrl = "https://nominatim.openstreetmap.org/search?" + new URLSearchParams({
-    q: qt, format: "json", limit: "20", countrycodes: "de", addressdetails: "1",
-  });
-  const nomRes = await fetch(nomUrl);
-  if (!nomRes.ok) throw new Error("Suche nicht erreichbar (Nominatim " + nomRes.status + ")");
+  // Step 1: Nominatim via our own API route (avoids browser CORS issues)
+  const nomRes = await fetch("/api/places?type=search&q=" + encodeURIComponent(qt));
+  if (!nomRes.ok) throw new Error("Suche nicht erreichbar (" + nomRes.status + ")");
   const nomData = await nomRes.json();
 
   // Direct restaurant hits from Nominatim
@@ -165,8 +162,7 @@ async function searchRestaurantsAI(q) {
   if (!nomData.length) throw new Error("Nichts gefunden. Tipp: Restaurantname oder Stadt eingeben.");
   const { lat, lon } = nomData[0];
 
-  const overpassQ = "[out:json][timeout:20];node[\"amenity\"=\"restaurant\"](around:3000," + lat + "," + lon + ");out tags 30;";
-  const ovRes = await fetch("https://overpass-api.de/api/interpreter", { method: "POST", body: "data=" + encodeURIComponent(overpassQ) });
+  const ovRes = await fetch("/api/places?type=nearby&lat=" + lat + "&lon=" + lon);
   if (!ovRes.ok) throw new Error("Restaurants konnten nicht geladen werden");
   const ovData = await ovRes.json();
   const results = (ovData.elements || []).filter(el => el.tags?.name).map(osmElementToRestaurant);
@@ -175,8 +171,7 @@ async function searchRestaurantsAI(q) {
 }
 async function fetchNearbyRestaurants(lat, lng) {
   try {
-    const q = "[out:json][timeout:12];node[\"amenity\"=\"restaurant\"](around:1200," + lat + "," + lng + ");out tags 30;";
-    const res = await fetch("https://overpass-api.de/api/interpreter", { method: "POST", body: "data=" + encodeURIComponent(q) });
+    const res = await fetch("/api/places?type=nearby&lat=" + lat + "&lon=" + lng);
     if (!res.ok) throw new Error("status " + res.status);
     const data = await res.json();
     const results = (data.elements || []).filter(el => el.tags && el.tags.name).map(el => ({
